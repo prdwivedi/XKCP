@@ -17,6 +17,9 @@ http://creativecommons.org/publicdomain/zero/1.0/
 #ifndef _SP800_185_h_
 #define _SP800_185_h_
 
+#include <stdio.h>
+#include <stdlib.h>
+
 #include "config.h"
 #ifdef XKCP_has_KeccakP1600
 
@@ -41,6 +44,12 @@ typedef struct {
     int                             emptyNameCustom;
     KCP_Phases                      phase;
 } cSHAKE_Instance;
+
+// Global variables for KMAC256 calculation over DPI
+#define MAX_KMAC_OUT_MSG_LENGTH 1024
+char kmac_256_out_msg[MAX_KMAC_OUT_MSG_LENGTH];
+int kmac_256_result;
+
 
 /** cSHAKE128 function, as defined in NIST's Special Publication 800-185,
   * published December 2016.
@@ -261,6 +270,89 @@ int KMAC128_Squeeze(KMAC_Instance *kmkInstance, BitSequence *output, BitLength o
   */
 int KMAC256(const BitSequence *key, BitLength keyBitLen, const BitSequence *input, BitLength inputBitLen,
         BitSequence *output, BitLength outputBitLen, const BitSequence *customization, BitLength customBitLen);
+
+
+/** Prints string as hexadecimal number
+  * @param  str             String to print
+  */
+void pshex(const unsigned char* str)
+{
+    const unsigned char* str_i = str;
+
+    for ( ; *str_i != '\0'; ++str_i )
+    {
+        printf("%02x ", *str_i);
+    }
+}
+
+/** KMAC256SV function, wrapper callable from System Verilog via DPI.
+  * @param  key             Pointer to the key (K).
+  * @param  key_bit_len     The length of the key in bits.
+  * @param  in_msg          Pointer to the input message (X).
+  * @param  input_bit_len   The length of the input message in bits.
+  *                         Only full bytes are supported, length must be a multiple of 8.
+  * @param  output_bit_len  The desired number of output bits (L).
+  * @param  customization   Pointer to the customization string (S).
+  * @param  custom_bit_len  The length of the customization string in bits.
+  * @return 0 if successful, 1 otherwise.
+  */
+int KMAC256SV(const char *key, unsigned int key_bit_len, const char *in_msg, unsigned int input_bit_len,
+                 unsigned int output_bit_len, const char *customization, unsigned int custom_bit_len)
+{
+    // Clear output buffer
+    memset(kmac_256_out_msg, 0, sizeof(char)*MAX_KMAC_OUT_MSG_LENGTH);
+
+    printf("XKCP:   KMAC256SV called with arguments:\n");
+    
+    printf("XKCP:     Key = ");
+    pshex(key);
+    printf(" ( %s ) \n", key);
+
+    printf("XKCP:     Key bit length = %d\n", key_bit_len);
+
+    printf("XKCP:     Message input = ");
+    pshex(in_msg);
+    printf(" ( %s )\n", in_msg);
+
+    printf("XKCP:     Input bit length = %d\n", input_bit_len);
+    printf("XKCP:     Output bit length = %d\n", output_bit_len);
+
+    printf("XKCP:     Customization string = ");
+    pshex(customization);
+    printf(" ( %s )\n", customization);
+
+    printf("XKCP:     Customization string bit length = %d\n", custom_bit_len);
+  
+    printf("XKCP: Running KMAC256 calculation...\n");
+    
+    kmac_256_result = KMAC256(
+      (const BitSequence *) key,
+      (BitLength) key_bit_len,
+      (const BitSequence *) in_msg,
+      (BitLength) input_bit_len,
+      kmac_256_out_msg,
+      (BitLength) output_bit_len,
+      (const BitSequence *) customization,
+      (BitLength) custom_bit_len
+    );
+    
+    printf("XKCP: Results of KMAC256 calculation: \n");
+    printf("XKCP:     Return value = %d\n", kmac_256_result);
+    printf("XKCP:     Output data = ");
+    pshex(kmac_256_out_msg);
+    printf(" ( %s )\n", kmac_256_out_msg);
+
+    printf("\n");
+
+    return kmac_256_result;
+}
+
+/** @return Output message from previous KMAC256 computation
+  */
+char* KMAC256SV_GET_OUT_MSG(void)
+{
+    return kmac_256_out_msg;
+}
 
 /**
   * Function to initialize the KMAC256 instance used in sequential MACing mode.

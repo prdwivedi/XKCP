@@ -46,9 +46,19 @@ typedef struct {
 } cSHAKE_Instance;
 
 // Global variables for KMAC256 calculation over DPI
-#define MAX_KMAC_OUT_MSG_LENGTH 1024
-char kmac_256_out_msg[MAX_KMAC_OUT_MSG_LENGTH];
-int kmac_256_result;
+#define KMAC_OUTPUT_DATA_BYTE_LEN  32
+#define KMAC_INPUT_DATA_BYTE_LEN   65
+#define KMAC_KEY_BYTE_LEN          32
+// Output array
+char          kmac_256_out_msg[KMAC_OUTPUT_DATA_BYTE_LEN];
+// Input array
+char          kmac_256_data_in[KMAC_INPUT_DATA_BYTE_LEN];
+// Key
+char          kmac_256_key[KMAC_KEY_BYTE_LEN];
+// Input array counter
+int unsigned  kmac_input_bytes_cnt;
+// KMAC256 return value
+int           kmac_256_result;
 
 
 /** cSHAKE128 function, as defined in NIST's Special Publication 800-185,
@@ -108,7 +118,7 @@ int cSHAKE128_Final(cSHAKE_Instance *cskInstance, BitSequence *output);
   * @param  cskInstance     Pointer to the hash instance initialized by cSHAKE128_Initialize().
   * @param  output          Pointer to the buffer where to store the output data.
   * @param  outputBitLen    The number of output bits desired.
-  *                         Only the last squeeze call can output a partial byte, 
+  *                         Only the last squeeze call can output a partial byte,
   *                         other calls must have a length multiple of 8.
   * @pre    cSHAKE128_Final() must have been already called.
   * @return 0 if successful, 1 otherwise.
@@ -174,7 +184,7 @@ int cSHAKE256_Final(cSHAKE_Instance *cskInstance, BitSequence *output);
   * @param  cskInstance     Pointer to the hash instance initialized by cSHAKE256_Initialize().
   * @param  output          Pointer to the buffer where to store the output data.
   * @param  outputBitLen    The number of output bits desired.
-  *                         Only the last squeeze call can output a partial byte, 
+  *                         Only the last squeeze call can output a partial byte,
   *                         other calls must have a length multiple of 8.
   * @pre    cSHAKE256_Final() must have been already called.
   * @return 0 if successful, 1 otherwise.
@@ -285,57 +295,80 @@ void pshex(const unsigned char* str)
     }
 }
 
+/** Stores KMAC Key byte
+  * @param  key_byte           Key byte value
+  * @param  byte_index         Key byte index
+  */
+int SET_KMAC_KEY_BYTE(char key_byte, unsigned int byte_index)
+{
+  kmac_256_key[byte_index] = key_byte;
+  return 0;
+}
+
+/** Stores KMAC input data byte
+  * @param  data_byte          Input data byte value
+  * @param  byte_index         Data byte index
+  */
+int SET_KMAC_DATA_IN_BYTE(char data_byte, unsigned int byte_index)
+{
+  kmac_256_data_in[byte_index] = data_byte;
+  kmac_input_bytes_cnt         = byte_index + 1;
+  return 0;
+}
+
+/** Return KMAC output data byte
+  * @param  byte_index         Data byte index
+  */
+char GET_KMAC_DATA_OUT_BYTE(unsigned int byte_index)
+{
+  return kmac_256_out_msg[byte_index];
+}
+
 /** KMAC256SV function, wrapper callable from System Verilog via DPI.
-  * @param  key             Pointer to the key (K).
-  * @param  key_bit_len     The length of the key in bits.
-  * @param  in_msg          Pointer to the input message (X).
-  * @param  input_bit_len   The length of the input message in bits.
-  *                         Only full bytes are supported, length must be a multiple of 8.
-  * @param  output_bit_len  The desired number of output bits (L).
-  * @param  customization   Pointer to the customization string (S).
-  * @param  custom_bit_len  The length of the customization string in bits.
   * @return 0 if successful, 1 otherwise.
   */
-int KMAC256SV(const char *key, unsigned int key_bit_len, const char *in_msg, unsigned int input_bit_len,
-                 unsigned int output_bit_len, const char *customization, unsigned int custom_bit_len)
+int KMAC256SV(void)
 {
+    const BitSequence     *customization  = (const BitSequence *)"My Tagged Application";
+    unsigned int           custom_bit_len = strlen((const char *)customization) * 8;
+
     // Clear output buffer
-    memset(kmac_256_out_msg, 0, sizeof(char)*MAX_KMAC_OUT_MSG_LENGTH);
+    memset(kmac_256_out_msg, 0, sizeof(char)*KMAC_OUTPUT_DATA_BYTE_LEN);
 
     printf("XKCP:   KMAC256SV called with arguments:\n");
-    
-    printf("XKCP:     Key = ");
-    pshex(key);
-    printf(" ( %s ) \n", key);
 
-    printf("XKCP:     Key bit length = %d\n", key_bit_len);
+    printf("XKCP:     Key = ");
+    pshex(kmac_256_key);
+    printf(" ( %s ) \n", kmac_256_key);
+
+    printf("XKCP:     Key bit length = %d\n", KMAC_KEY_BYTE_LEN*8);
 
     printf("XKCP:     Message input = ");
-    pshex(in_msg);
-    printf(" ( %s )\n", in_msg);
+    pshex(kmac_256_data_in);
+    printf(" ( %s )\n", kmac_256_data_in);
 
-    printf("XKCP:     Input bit length = %d\n", input_bit_len);
-    printf("XKCP:     Output bit length = %d\n", output_bit_len);
+    printf("XKCP:     Input bit length = %d\n", kmac_input_bytes_cnt*8);
+    printf("XKCP:     Output bit length = %d\n", KMAC_OUTPUT_DATA_BYTE_LEN*8);
 
     printf("XKCP:     Customization string = ");
     pshex(customization);
     printf(" ( %s )\n", customization);
 
     printf("XKCP:     Customization string bit length = %d\n", custom_bit_len);
-  
+
     printf("XKCP: Running KMAC256 calculation...\n");
-    
+
     kmac_256_result = KMAC256(
-      (const BitSequence *) key,
-      (BitLength) key_bit_len,
-      (const BitSequence *) in_msg,
-      (BitLength) input_bit_len,
+      (const BitSequence *) kmac_256_key,
+      (BitLength) KMAC_KEY_BYTE_LEN*8,
+      (const BitSequence *) kmac_256_data_in,
+      (BitLength) kmac_input_bytes_cnt*8,
       kmac_256_out_msg,
-      (BitLength) output_bit_len,
+      (BitLength) KMAC_OUTPUT_DATA_BYTE_LEN*8,
       (const BitSequence *) customization,
       (BitLength) custom_bit_len
     );
-    
+
     printf("XKCP: Results of KMAC256 calculation: \n");
     printf("XKCP:     Return value = %d\n", kmac_256_result);
     printf("XKCP:     Output data = ");
